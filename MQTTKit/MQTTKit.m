@@ -238,10 +238,9 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
     // FIXME: check for errors
     mosquitto_username_pw_set(mosq, cstrUsername, cstrPassword);
     mosquitto_reconnect_delay_set(mosq, self.reconnectDelay, self.reconnectDelayMax, self.reconnectExponentialBackoff);
-
-    mosquitto_connect(mosq, cstrHost, self.port, self.keepAlive);
     
     dispatch_async(self.queue, ^{
+        mosquitto_connect(mosq, cstrHost, self.port, self.keepAlive);
         LogDebug(@"start mosquitto loop on %@", self.queue);
         mosquitto_loop_forever(mosq, -1, 1);
         LogDebug(@"end mosquitto loop on %@", self.queue);
