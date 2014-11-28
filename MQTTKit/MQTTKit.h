@@ -7,14 +7,25 @@
 //  Copyright 2012 Nicholas Humfrey. All rights reserved.
 //
 
-typedef enum MQTTConnectionReturnCode : NSUInteger {
-    ConnectionAccepted,
-    ConnectionRefusedUnacceptableProtocolVersion,
-    ConnectionRefusedIdentiferRejected,
-    ConnectionRefusedServerUnavailable,
-    ConnectionRefusedBadUserNameOrPassword,
-    ConnectionRefusedNotAuthorized
-} MQTTConnectionReturnCode;
+typedef NS_ENUM(NSUInteger, MQTTConnectionReturnCode) {
+    MQTTConnectionConnPending = -1,
+    MQTTConnectionSuccess = 0,
+    MQTTConnectionRefusedNomem = 1,
+    MQTTConnectionRefusedProtocol = 2,
+    MQTTConnectionRefusedInval = 3,
+    MQTTConnectionRefusedNoConn = 4,
+    MQTTConnectionRefusedConnRefused = 5,
+    MQTTConnectionRefusedNotFound = 6,
+    MQTTConnectionRefusedConnLost = 7,
+    MQTTConnectionRefusedTLS = 8,
+    MQTTConnectionRefusedPayloadSize = 9,
+    MQTTConnectionRefusedNotSupported = 10,
+    MQTTConnectionRefusedAuth = 11,
+    MQTTConnectionRefusedAclDenied = 12,
+    MQTTConnectionRefusedUnknown = 13,
+    MQTTConnectionRefusedErrno = 14,
+    MQTTConnectionRefusedEai = 15
+};
 
 typedef enum MQTTQualityOfService : NSUInteger {
     AtMostOnce,
@@ -50,6 +61,8 @@ typedef void (^MQTTDisconnectionHandler)(NSUInteger code);
 @property (readwrite, copy) NSString *clientID;
 @property (readwrite, copy) NSString *host;
 @property (readwrite, assign) unsigned short port;
+@property (readwrite, assign) BOOL useTLS;
+@property (readwrite, assign) BOOL allowUntrustedCertificates; // allow connection if the certificate is valid but not trusted.
 @property (readwrite, copy) NSString *username;
 @property (readwrite, copy) NSString *password;
 @property (readwrite, assign) unsigned short keepAlive;

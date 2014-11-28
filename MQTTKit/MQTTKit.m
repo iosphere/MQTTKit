@@ -9,6 +9,7 @@
 
 #import "MQTTKit.h"
 #import "mosquitto.h"
+#import <openssl/ssl.h>
 
 #if 0 // set to 1 to enable logs
 
@@ -69,6 +70,7 @@
 
 // dispatch queue to run the mosquitto_loop_forever.
 @property (nonatomic, strong) dispatch_queue_t queue;
+@property (nonatomic, strong) NSMutableArray *certificateChain;
 
 @end
 
@@ -81,8 +83,9 @@
 static void on_connect(struct mosquitto *mosq, void *obj, int rc)
 {
     MQTTClient* client = (__bridge MQTTClient*)obj;
+
     LogDebug(@"[%@] on_connect rc = %d", client.clientID, rc);
-    client.connected = (rc == ConnectionAccepted);
+    client.connected = (rc == MQTTConnectionSuccess);
     if (client.connectionCompletionHandler) {
         client.connectionCompletionHandler(rc);
     }
@@ -162,6 +165,91 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
     }
 }
 
+static bool on_verify_tls(struct mosquitto *mosq, void* obj, void *ctx, int open_ssl_preverify_ok) {
+    MQTTClient* client = (__bridge MQTTClient*)obj;
+
+    unsigned char *der_cert = NULL;
+
+    X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
+    int open_ssl_error = X509_STORE_CTX_get_error(ctx);
+    int	depth = X509_STORE_CTX_get_error_depth(ctx);
+
+    if (!cert) {
+        LogDebug(@"Error getting X509 cert from mosq");
+        return false;
+    }
+
+    int len = i2d_X509((X509 *)cert, &der_cert);
+
+    if (!der_cert) {
+        LogDebug(@"Error extracting DER from OpenSSL");
+        return false;
+    }
+
+    if (!len) {
+        LogDebug(@"Error extracting DER from OpenSSL");
+        free(der_cert);
+        return false;
+    }
+
+    NSData *certData = [NSData dataWithBytes:der_cert length:len];
+    LogDebug(@"%@", certData);
+    free(der_cert);
+
+    SecCertificateRef certRef = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)(certData));
+
+    if (!client.certificateChain) {
+        [client setCertificateChain:[NSMutableArray new]];
+    }
+
+    [client.certificateChain addObject:(__bridge id)(certRef)];
+
+    // only verify the hostname if the leaf certificate is available.
+    SecPolicyRef policyRef = (depth == 0) ? SecPolicyCreateSSL(false, (__bridge CFStringRef)(client.host)) : SecPolicyCreateBasicX509();
+
+    SecTrustRef trustRef = NULL;
+    OSStatus status = SecTrustCreateWithCertificates(certRef, policyRef, &trustRef);
+
+    SecTrustSetAnchorCertificates(trustRef, (__bridge CFArrayRef) client.certificateChain);
+    SecTrustSetAnchorCertificatesOnly(trustRef, NO);
+
+    if ((status != errSecSuccess) || !trustRef) {
+        LogDebug(@"Error creating SecTrustRef: %@", @(status));
+
+        CFRelease(certRef);
+        CFRelease(policyRef);
+        if (trustRef) {
+            CFRelease(trustRef);
+        }
+
+        return false;
+    }
+
+    SecTrustResultType trustResult;
+    status = SecTrustEvaluate(trustRef, &trustResult);
+
+    //CFArrayRef debug = SecTrustCopyProperties(trustRef);
+
+    bool validCert = false;
+    LogDebug(@"SecTrustResult: %@", @(trustResult));
+
+    if (open_ssl_error || status != 0) {
+        LogDebug(@"OpenSSL error:num=%d:%s\n", open_ssl_error, X509_verify_cert_error_string(open_ssl_error));
+        LogDebug(@"Status: %@", @(status));
+    }
+
+    if (((trustResult == kSecTrustResultProceed) || (trustResult == kSecTrustResultUnspecified))
+        || (client.allowUntrustedCertificates &&
+            ((trustResult == kSecTrustResultRecoverableTrustFailure) || (trustResult == kSecTrustResultUnspecified)))) {
+        validCert = true;
+    }
+    
+    CFRelease(certRef);
+    CFRelease(policyRef);
+    CFRelease(trustRef);
+
+    return validCert;
+}
 
 // Initialize is called just before the first object is allocated
 + (void)initialize {
@@ -210,12 +298,12 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
     return self;
 }
 
-- (void) setMessageRetry: (NSUInteger)seconds
-{
+- (void)setMessageRetry:(NSUInteger)seconds {
     mosquitto_message_retry_set(mosq, (unsigned int)seconds);
 }
 
-- (void) dealloc {
+- (void)dealloc
+{
     if (mosq) {
         mosquitto_destroy(mosq);
         mosq = NULL;
@@ -224,7 +312,8 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
 
 #pragma mark - Connection
 
-- (void) connectWithCompletionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler {
+- (void)connectWithCompletionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler
+{
     self.connectionCompletionHandler = completionHandler;
 
     const char *cstrHost = [self.host cStringUsingEncoding:NSASCIIStringEncoding];
@@ -239,9 +328,14 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
     // FIXME: check for errors
     mosquitto_username_pw_set(mosq, cstrUsername, cstrPassword);
     mosquitto_reconnect_delay_set(mosq, self.reconnectDelay, self.reconnectDelayMax, self.reconnectExponentialBackoff);
-    
+
+    if (self.useTLS) {
+        mosquitto_verify_ssl_callback_set(mosq, on_verify_tls);
+    }
+
     dispatch_async(self.queue, ^{
         mosquitto_connect(mosq, cstrHost, self.port, self.keepAlive);
+
         LogDebug(@"start mosquitto loop on %@", self.queue);
         mosquitto_loop_forever(mosq, -1, 1);
         LogDebug(@"end mosquitto loop on %@", self.queue);
@@ -249,16 +343,18 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
 }
 
 - (void)connectToHost:(NSString *)host
-    completionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler {
+    completionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler
+{
     self.host = host;
     [self connectWithCompletionHandler:completionHandler];
 }
 
-- (void) reconnect {
+- (void)reconnect {
     mosquitto_reconnect(mosq);
 }
 
-- (void) disconnectWithCompletionHandler:(MQTTDisconnectionHandler)completionHandler {
+- (void)disconnectWithCompletionHandler:(MQTTDisconnectionHandler)completionHandler
+{
     if (completionHandler) {
         self.disconnectionHandler = completionHandler;
     }
@@ -271,7 +367,7 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
              retain:(BOOL)retain
 {
     const char* cstrTopic = [willTopic cStringUsingEncoding:NSUTF8StringEncoding];
-    mosquitto_will_set(mosq, cstrTopic, payload.length, payload.bytes, willQos, retain);
+    mosquitto_will_set(mosq, cstrTopic, (int)payload.length, payload.bytes, willQos, retain);
 }
 
 - (void)setWill:(NSString *)payload
@@ -302,7 +398,7 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
         [self.publishHandlers setObject:completionHandler forKey:[NSNumber numberWithInt:0]];
     }
     int mid;
-    mosquitto_publish(mosq, &mid, cstrTopic, payload.length, payload.bytes, qos, retain);
+    mosquitto_publish(mosq, &mid, cstrTopic, (int)payload.length, payload.bytes, qos, retain);
     if (completionHandler) {
         if (qos == 0) {
             completionHandler(mid);

@@ -928,7 +928,7 @@ libmosq_EXPORT int mosquitto_tls_set(struct mosquitto *mosq,
 		int (*pw_callback)(char *buf, int size, int rwflag, void *userdata));
 
 /*
- * Function: mosquitto_tls_insecure_set
+ * Function: mosquitto_tls_insecure_setcallback
  *
  * Configure verification of the server hostname in the server certificate. If
  * value is set to true, it is impossible to guarantee that the host you are
@@ -1236,6 +1236,28 @@ libmosq_EXPORT int mosquitto_max_inflight_messages_set(struct mosquitto *mosq, u
  *                  retrying. Defaults to 20.
  */
 libmosq_EXPORT void mosquitto_message_retry_set(struct mosquitto *mosq, unsigned int message_retry);
+
+/*
+ * Function: mosquitto_connect_callback_set
+ *
+ * Set the verify ssl cert callback. Can be used to abort the connection if the 
+ * certificate chain is not trusted.
+ *
+ * Parameters:
+ *  mosq -          a valid mosquitto instance.
+ *  on_verify_tls - a callback function in the following form:
+ *         bool callback(struct mosquitto *mosq, void *obj, void **cert, int preverify_ok, int err)
+ *
+ * Callback Parameters:
+ *  mosq -          the mosquitto instance making the callback.
+ *  obj -           the user data provided in <mosquitto_new>
+ *  cert -          a OpenSSL X509 cert
+ *  preverify_ok -  result of the OpenSSL verification process
+ *  err -           possible error during the OpenSSL verification process
+ *
+ */
+libmosq_EXPORT void mosquitto_verify_ssl_callback_set(struct mosquitto *mosq,
+        bool (*on_verify_tls)(struct mosquitto *, void *, void *, int));
 
 /*
  * Function: mosquitto_user_data_set

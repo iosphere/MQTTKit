@@ -1,0 +1,1 @@
+Build script borrowed from https://github.com/x2on/OpenSSL-for-iPhone
