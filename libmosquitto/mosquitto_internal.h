@@ -188,6 +188,8 @@ struct mosquitto {
 	pthread_mutex_t in_message_mutex;
 	pthread_mutex_t out_message_mutex;
 	pthread_mutex_t mid_mutex;
+  pthread_mutex_t message_mutex;
+  pthread_mutex_t tls_verify_mutex;
 	pthread_t thread_id;
 #endif
 	bool clean_session;
@@ -232,6 +234,7 @@ struct mosquitto {
 	void (*on_subscribe)(struct mosquitto *, void *userdata, int mid, int qos_count, const int *granted_qos);
 	void (*on_unsubscribe)(struct mosquitto *, void *userdata, int mid);
 	void (*on_log)(struct mosquitto *, void *userdata, int level, const char *str);
+    bool (*on_verify_tls)(struct mosquitto *, void *, void *, int);
 	//void (*on_error)();
 	char *host;
 	int port;

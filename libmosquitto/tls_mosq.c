@@ -96,6 +96,23 @@ int mosquitto__cmp_hostname_wildcard(char *certname, const char *hostname)
 	}
 }
 
+int _mosquitto_server_certificate_verify_by_callback(int preverify_ok, X509_STORE_CTX *ctx) {
+    struct mosquitto *mosq;
+    SSL *ssl = X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+    mosq = SSL_get_ex_data(ssl, tls_ex_index_mosq);
+    if(!mosq) return 0;
+
+    bool trustworthy = true;
+
+    pthread_mutex_lock(&mosq->tls_verify_mutex);
+    if(mosq->on_verify_tls){
+        trustworthy = mosq->on_verify_tls(mosq, mosq->userdata, ctx, preverify_ok);
+    }
+    pthread_mutex_unlock(&mosq->tls_verify_mutex);
+
+    return trustworthy;
+}
+
 /* This code is based heavily on the example provided in "Secure Programming
  * Cookbook for C and C++".
  */

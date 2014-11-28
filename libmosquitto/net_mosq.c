@@ -415,7 +415,7 @@ int _mosquitto_socket_connect(struct mosquitto *mosq, const char *host, uint16_t
 	if(rc > 0) return rc;
 
 #ifdef WITH_TLS
-	if(mosq->tls_cafile || mosq->tls_capath || mosq->tls_psk){
+	if(mosq->tls_cafile || mosq->tls_capath || mosq->tls_psk || (mosq->tls_cert_reqs == SSL_VERIFY_NONE) || mosq->on_verify_tls){
 #if OPENSSL_VERSION_NUMBER >= 0x10001000L
 		if(!mosq->tls_version || !strcmp(mosq->tls_version, "tlsv1.2")){
 			mosq->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
@@ -528,7 +528,13 @@ int _mosquitto_socket_connect(struct mosquitto *mosq, const char *host, uint16_t
 		}else if(mosq->tls_psk){
 			SSL_CTX_set_psk_client_callback(mosq->ssl_ctx, psk_client_callback);
 #endif
-		}
+        } else if(mosq->tls_cert_reqs == SSL_VERIFY_NONE) {
+            SSL_CTX_set_verify(mosq->ssl_ctx, SSL_VERIFY_NONE, NULL);
+        } else if(mosq->on_verify_tls) {
+#if defined(WITH_THREADING) && !defined(WITH_BROKER)
+            SSL_CTX_set_verify(mosq->ssl_ctx, SSL_VERIFY_PEER, _mosquitto_server_certificate_verify_by_callback);
+#endif
+        }
 
 		mosq->ssl = SSL_new(mosq->ssl_ctx);
 		if(!mosq->ssl){
@@ -546,9 +552,23 @@ int _mosquitto_socket_connect(struct mosquitto *mosq, const char *host, uint16_t
 		mosq->sock = sock;
 		if(mosquitto__socket_connect_tls(mosq)){
 			return MOSQ_ERR_TLS;
+
+		ret = SSL_connect(mosq->ssl);
+
+		if(ret != 1){
+			ret = SSL_get_error(mosq->ssl, ret);
+			if(ret == SSL_ERROR_WANT_READ){
+				/* We always try to read anyway */
+			}else if(ret == SSL_ERROR_WANT_WRITE){
+				mosq->want_write = true;
+			}else{
+				COMPAT_CLOSE(sock);
+				return MOSQ_ERR_TLS;
+			}
 		}
 
 	}
+    
 #endif
 
 	mosq->sock = sock;
