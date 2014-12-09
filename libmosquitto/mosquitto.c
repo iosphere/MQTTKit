@@ -190,7 +190,8 @@ int mosquitto_reinitialise(struct mosquitto *mosq, const char *id, bool clean_se
 	mosq->on_publish = NULL;
 	mosq->on_message = NULL;
 	mosq->on_subscribe = NULL;
-	mosq->on_unsubscribe = NULL;
+	mosq->on_unsubscribe = NULL:
+	mosq->on_verify_tls = NULL;
 	mosq->host = NULL;
 	mosq->port = 1883;
 	mosq->in_callback = false;
