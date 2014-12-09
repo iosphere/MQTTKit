@@ -152,7 +152,7 @@ struct mosquitto {
 	char *tls_psk;
 	char *tls_psk_identity;
 	bool tls_insecure;
-    bool (*on_verify_tls)(struct mosquitto *, void *, void *, int);
+	bool (*on_verify_tls)(struct mosquitto *, void *, void *, int);
 #endif
 	bool want_write;
 #if defined(WITH_THREADING) && !defined(WITH_BROKER)
@@ -162,7 +162,7 @@ struct mosquitto {
 	pthread_mutex_t out_packet_mutex;
 	pthread_mutex_t current_out_packet_mutex;
 	pthread_mutex_t state_mutex;
-    pthread_mutex_t message_mutex;
+	pthread_mutex_t message_mutex;
 	pthread_t thread_id;
 #endif
 #ifdef WITH_BROKER
