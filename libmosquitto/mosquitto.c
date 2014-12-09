@@ -201,6 +201,7 @@ int mosquitto_reinitialise(struct mosquitto *mosq, const char *id, bool clean_se
 	mosq->tls_cert_reqs = SSL_VERIFY_PEER;
 	mosq->tls_insecure = false;
 	mosq->want_write = false;
+  mosq->on_verify_tls = NULL;
 #endif
 #ifdef WITH_THREADING
 	pthread_mutex_init(&mosq->callback_mutex, NULL);
@@ -1263,9 +1264,11 @@ void mosquitto_log_callback_set(struct mosquitto *mosq, void (*on_log)(struct mo
 
 void mosquitto_verify_ssl_callback_set(struct mosquitto *mosq, bool (*on_verify_tls)(struct mosquitto *, void*, void *, int))
 {
-    pthread_mutex_lock(&mosq->tls_verify_mutex);
+#ifdef WITH_TLS
+    pthread_mutex_lock(&mosq->callback_mutex);
     mosq->on_verify_tls = on_verify_tls;
-    pthread_mutex_unlock(&mosq->tls_verify_mutex);
+    pthread_mutex_unlock(&mosq->callback_mutex);
+#endif
 }
 
 void mosquitto_user_data_set(struct mosquitto *mosq, void *userdata)

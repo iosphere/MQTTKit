@@ -104,11 +104,13 @@ int _mosquitto_server_certificate_verify_by_callback(int preverify_ok, X509_STOR
 
     bool trustworthy = true;
 
-    pthread_mutex_lock(&mosq->tls_verify_mutex);
+    pthread_mutex_lock(&mosq->callback_mutex);
     if(mosq->on_verify_tls){
+        mosq->in_callback = true;
         trustworthy = mosq->on_verify_tls(mosq, mosq->userdata, ctx, preverify_ok);
+        mosq->in_callback = false;
     }
-    pthread_mutex_unlock(&mosq->tls_verify_mutex);
+    pthread_mutex_unlock(&mosq->callback_mutex);
 
     return trustworthy;
 }
