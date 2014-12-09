@@ -175,7 +175,7 @@ struct mosquitto {
 	char *tls_psk_identity;
 	int tls_cert_reqs;
 	bool tls_insecure;
-    bool (*on_verify_tls)(struct mosquitto *, void *, void *, int);
+	bool (*on_verify_tls)(struct mosquitto *, void *, void *, int);
 #endif
 	bool want_write;
 	bool want_connect;
