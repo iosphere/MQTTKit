@@ -163,6 +163,12 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
 }
 
 
+static void on_state_change(struct mosquitto *mosq, void *obj, int state)
+{
+    MQTTClient* client = (__bridge MQTTClient*)obj;
+    LogDebug(@"[%@] on_state_change = %i", client.clientID, state);
+}
+
 // Initialize is called just before the first object is allocated
 + (void)initialize {
     mosquitto_lib_init();
@@ -204,7 +210,8 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
         mosquitto_message_callback_set(mosq, on_message);
         mosquitto_subscribe_callback_set(mosq, on_subscribe);
         mosquitto_unsubscribe_callback_set(mosq, on_unsubscribe);
-
+        mosquitto_state_change_callback_set(mosq, on_state_change);
+        
         self.queue = dispatch_queue_create(cstrClientId, NULL);
     }
     return self;

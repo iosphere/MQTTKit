@@ -1238,6 +1238,17 @@ libmosq_EXPORT int mosquitto_max_inflight_messages_set(struct mosquitto *mosq, u
 libmosq_EXPORT void mosquitto_message_retry_set(struct mosquitto *mosq, unsigned int message_retry);
 
 /*
+ * Function: mosquitto_state_change_callback_set
+ *
+ *
+ * Callback Parameters:
+ *  mosq - the mosquitto instance making the callback.
+ *  obj -  the user data provided in <mosquitto_new>
+ *  state -integer value indicating the state of the client for the disconnect.
+ */
+libmosq_EXPORT void mosquitto_state_change_callback_set(struct mosquitto *mosq, void (*on_state_change)(struct mosquitto *, void *, int state));
+
+/*
  * Function: mosquitto_user_data_set
  *
  * When <mosquitto_new> is called, the pointer given as the "obj" parameter

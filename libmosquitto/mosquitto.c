@@ -191,6 +191,7 @@ int mosquitto_reinitialise(struct mosquitto *mosq, const char *id, bool clean_se
 	mosq->on_message = NULL;
 	mosq->on_subscribe = NULL;
 	mosq->on_unsubscribe = NULL;
+    mosq->on_state_change = NULL;
 	mosq->host = NULL;
 	mosq->port = 1883;
 	mosq->in_callback = false;
@@ -411,6 +412,14 @@ int mosquitto_connect_bind(struct mosquitto *mosq, const char *host, int port, i
 	pthread_mutex_lock(&mosq->state_mutex);
 	mosq->state = mosq_cs_new;
 	pthread_mutex_unlock(&mosq->state_mutex);
+    
+    pthread_mutex_lock(&mosq->callback_mutex);
+    if(mosq->on_state_change){
+        mosq->in_callback = true;
+        mosq->on_state_change(mosq, mosq->userdata, mosq->state);
+        mosq->in_callback = false;
+    }
+    pthread_mutex_unlock(&mosq->callback_mutex);
 
 	return _mosquitto_reconnect(mosq, true);
 }
@@ -429,6 +438,14 @@ int mosquitto_connect_bind_async(struct mosquitto *mosq, const char *host, int p
 	mosq->state = mosq_cs_connect_async;
 	pthread_mutex_unlock(&mosq->state_mutex);
 
+    pthread_mutex_lock(&mosq->callback_mutex);
+    if(mosq->on_state_change){
+        mosq->in_callback = true;
+        mosq->on_state_change(mosq, mosq->userdata, mosq->state);
+        mosq->in_callback = false;
+    }
+    pthread_mutex_unlock(&mosq->callback_mutex);
+    
 	return _mosquitto_reconnect(mosq, false);
 }
 
@@ -452,6 +469,14 @@ static int _mosquitto_reconnect(struct mosquitto *mosq, bool blocking)
 	pthread_mutex_lock(&mosq->state_mutex);
 	mosq->state = mosq_cs_new;
 	pthread_mutex_unlock(&mosq->state_mutex);
+    
+    pthread_mutex_lock(&mosq->callback_mutex);
+    if(mosq->on_state_change){
+        mosq->in_callback = true;
+        mosq->on_state_change(mosq, mosq->userdata, mosq->state);
+        mosq->in_callback = false;
+    }
+    pthread_mutex_unlock(&mosq->callback_mutex);
 
 	pthread_mutex_lock(&mosq->msgtime_mutex);
 	mosq->last_msg_in = mosquitto_time();
@@ -502,6 +527,14 @@ int mosquitto_disconnect(struct mosquitto *mosq)
 	mosq->state = mosq_cs_disconnecting;
 	pthread_mutex_unlock(&mosq->state_mutex);
 
+    pthread_mutex_lock(&mosq->callback_mutex);
+    if(mosq->on_state_change){
+        mosq->in_callback = true;
+        mosq->on_state_change(mosq, mosq->userdata, mosq->state);
+        mosq->in_callback = false;
+    }
+    pthread_mutex_unlock(&mosq->callback_mutex);
+    
 	if(mosq->sock == INVALID_SOCKET) return MOSQ_ERR_NO_CONN;
 	return _mosquitto_send_disconnect(mosq);
 }
@@ -1074,6 +1107,13 @@ void mosquitto_log_callback_set(struct mosquitto *mosq, void (*on_log)(struct mo
 	pthread_mutex_lock(&mosq->log_callback_mutex);
 	mosq->on_log = on_log;
 	pthread_mutex_unlock(&mosq->log_callback_mutex);
+}
+
+void mosquitto_state_change_callback_set(struct mosquitto *mosq, void (*on_state_change)(struct mosquitto *, void *, int state))
+{
+    pthread_mutex_lock(&mosq->callback_mutex);
+    mosq->on_state_change = on_state_change;
+    pthread_mutex_unlock(&mosq->callback_mutex);
 }
 
 void mosquitto_user_data_set(struct mosquitto *mosq, void *userdata)
