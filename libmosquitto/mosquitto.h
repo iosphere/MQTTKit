@@ -1085,6 +1085,26 @@ libmosq_EXPORT int mosquitto_tls_opts_set(struct mosquitto *mosq, int cert_reqs,
  */
 libmosq_EXPORT int mosquitto_tls_psk_set(struct mosquitto *mosq, const char *psk, const char *identity, const char *ciphers);
 
+/*
+ * Function: mosquitto_tls_sni_set
+ *
+ * Configure the client for TLS Server Name Indication support. Must be called
+ * before <mosquitto_connect>.
+ *
+ * Parameters:
+ *  mosq -     a valid mosquitto instance.
+ *  hostname - the SNI hostname.
+ *
+ * Returns:
+ *	MOSQ_ERR_SUCCESS - on success.
+ * 	MOSQ_ERR_INVAL -   if the input parameters were invalid.
+ * 	MOSQ_ERR_NOMEM -   if an out of memory condition occurred.
+ *
+ * See Also:
+ *	<mosquitto_tls_set>
+ */
+libmosq_EXPORT int mosquitto_tls_sni_set(struct mosquitto *mosq, const char *hostname);
+
 /* 
  * Function: mosquitto_connect_callback_set
  *

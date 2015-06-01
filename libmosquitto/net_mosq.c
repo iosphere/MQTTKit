@@ -549,7 +549,13 @@ int _mosquitto_socket_connect(struct mosquitto *mosq, const char *host, uint16_t
 		}
 		SSL_set_bio(mosq->ssl, bio, bio);
 
-		mosq->sock = sock;
+#ifdef WITH_BROKER
+        if(mosq->tls_sni_hostname){
+            SSL_set_tlsext(mosq->ssl, mosq->tls_sni_hostname);
+        }
+#endif
+
+        mosq->sock = sock;
 		if(mosquitto__socket_connect_tls(mosq)) {
             return MOSQ_ERR_TLS;
         }

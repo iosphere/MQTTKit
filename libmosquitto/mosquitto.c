@@ -818,6 +818,23 @@ int mosquitto_tls_psk_set(struct mosquitto *mosq, const char *psk, const char *i
 }
 
 
+int mosquitto_tls_sni_set(struct mosquitto *mosq, const char *hostname)
+{
+#ifdef WITH_TLS
+	if(!mosq || !hostname) return MOSQ_ERR_INVAL;
+
+	mosq->tls_sni_hostname = _mosquitto_strdup(hostname);
+	if(!mosq->tls_sni_hostname){
+		return MOSQ_ERR_NOMEM;
+	}
+
+	return MOSQ_ERR_SUCCESS;
+#else
+	return MOSQ_ERR_NOT_SUPPORTED;
+#endif
+}
+
+
 int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 {
 #ifdef HAVE_PSELECT
