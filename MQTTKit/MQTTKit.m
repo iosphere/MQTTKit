@@ -337,6 +337,7 @@ static bool on_verify_tls(struct mosquitto *mosq, void* obj, void *ctx, int open
 
     if (self.useTLS) {
         mosquitto_verify_ssl_callback_set(mosq, on_verify_tls);
+        mosquitto_tls_sni_set(mosq, cstrHost);
     }
 
     dispatch_async(self.queue, ^{

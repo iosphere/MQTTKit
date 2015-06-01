@@ -319,6 +319,7 @@ void _mosquitto_destroy(struct mosquitto *mosq)
 	if(mosq->tls_ciphers) _mosquitto_free(mosq->tls_ciphers);
 	if(mosq->tls_psk) _mosquitto_free(mosq->tls_psk);
 	if(mosq->tls_psk_identity) _mosquitto_free(mosq->tls_psk_identity);
+	if(mosq->tls_sni_hostname) _mosquitto_free(mosq->tls_sni_hostname);
 #endif
 
 	if(mosq->address){

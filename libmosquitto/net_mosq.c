@@ -541,19 +541,20 @@ int _mosquitto_socket_connect(struct mosquitto *mosq, const char *host, uint16_t
 			COMPAT_CLOSE(sock);
 			return MOSQ_ERR_TLS;
 		}
-		SSL_set_ex_data(mosq->ssl, tls_ex_index_mosq, mosq);
+
+        if(mosq->tls_sni_hostname && !SSL_set_tlsext_host_name(mosq->ssl, mosq->tls_sni_hostname)) {
+            _mosquitto_log_printf(mosq, MOSQ_LOG_ERR, "Unable to set SNI hostname \"%s\".", mosq->tls_sni_hostname);
+            COMPAT_CLOSE(sock);
+            return MOSQ_ERR_TLS;
+        }
+
+        SSL_set_ex_data(mosq->ssl, tls_ex_index_mosq, mosq);
 		bio = BIO_new_socket(sock, BIO_NOCLOSE);
 		if(!bio){
 			COMPAT_CLOSE(sock);
 			return MOSQ_ERR_TLS;
 		}
 		SSL_set_bio(mosq->ssl, bio, bio);
-
-#ifdef WITH_BROKER
-        if(mosq->tls_sni_hostname){
-            SSL_set_tlsext(mosq->ssl, mosq->tls_sni_hostname);
-        }
-#endif
 
         mosq->sock = sock;
 		if(mosquitto__socket_connect_tls(mosq)) {
