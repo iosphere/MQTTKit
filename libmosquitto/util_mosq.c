@@ -1,30 +1,17 @@
 /*
-Copyright (c) 2009-2013 Roger Light <roger@atchoo.org>
-All rights reserved.
+Copyright (c) 2009-2014 Roger Light <roger@atchoo.org>
 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice,
-   this list of conditions and the following disclaimer.
-2. Redistributions in binary form must reproduce the above copyright
-   notice, this list of conditions and the following disclaimer in the
-   documentation and/or other materials provided with the distribution.
-3. Neither the name of mosquitto nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
+All rights reserved. This program and the accompanying materials
+are made available under the terms of the Eclipse Public License v1.0
+and Eclipse Distribution License v1.0 which accompany this distribution.
+ 
+The Eclipse Public License is available at
+   http://www.eclipse.org/legal/epl-v10.html
+and the Eclipse Distribution License is available at
+  http://www.eclipse.org/org/documents/edl-v10.php.
+ 
+Contributors:
+   Roger Light - initial implementation and documentation.
 */
 
 #include <assert.h>
@@ -35,16 +22,20 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 
-#include "mosquitto.h"
-#include "memory_mosq.h"
-#include "net_mosq.h"
-#include "send_mosq.h"
-#include "time_mosq.h"
-#include "tls_mosq.h"
-#include "util_mosq.h"
+#include <mosquitto.h>
+#include <memory_mosq.h>
+#include <net_mosq.h>
+#include <send_mosq.h>
+#include <time_mosq.h>
+#include <tls_mosq.h>
+#include <util_mosq.h>
 
 #ifdef WITH_BROKER
-#include "mosquitto_broker.h"
+#include <mosquitto_broker.h>
+#endif
+
+#ifdef WITH_WEBSOCKETS
+#include <libwebsockets.h>
 #endif
 
 int _mosquitto_packet_alloc(struct _mosquitto_packet *packet)
@@ -70,7 +61,11 @@ int _mosquitto_packet_alloc(struct _mosquitto_packet *packet)
 	}while(remaining_length > 0 && packet->remaining_count < 5);
 	if(packet->remaining_count == 5) return MOSQ_ERR_PAYLOAD_SIZE;
 	packet->packet_length = packet->remaining_length + 1 + packet->remaining_count;
+#ifdef WITH_WEBSOCKETS
+	packet->payload = _mosquitto_malloc(sizeof(uint8_t)*packet->packet_length + LWS_SEND_BUFFER_PRE_PADDING + LWS_SEND_BUFFER_POST_PADDING);
+#else
 	packet->payload = _mosquitto_malloc(sizeof(uint8_t)*packet->packet_length);
+#endif
 	if(!packet->payload) return MOSQ_ERR_NOMEM;
 
 	packet->payload[0] = packet->command;
@@ -82,7 +77,11 @@ int _mosquitto_packet_alloc(struct _mosquitto_packet *packet)
 	return MOSQ_ERR_SUCCESS;
 }
 
+#ifdef WITH_BROKER
+void _mosquitto_check_keepalive(struct mosquitto_db *db, struct mosquitto *mosq)
+#else
 void _mosquitto_check_keepalive(struct mosquitto *mosq)
+#endif
 {
 	time_t last_msg_out;
 	time_t last_msg_in;
@@ -99,7 +98,7 @@ void _mosquitto_check_keepalive(struct mosquitto *mosq)
 				&& now - mosq->last_msg_out >= mosq->bridge->idle_timeout){
 
 		_mosquitto_log_printf(NULL, MOSQ_LOG_NOTICE, "Bridge connection %s has exceeded idle timeout, disconnecting.", mosq->id);
-		_mosquitto_socket_close(mosq);
+		_mosquitto_socket_close(db, mosq);
 		return;
 	}
 #endif
@@ -107,7 +106,7 @@ void _mosquitto_check_keepalive(struct mosquitto *mosq)
 	last_msg_out = mosq->last_msg_out;
 	last_msg_in = mosq->last_msg_in;
 	pthread_mutex_unlock(&mosq->msgtime_mutex);
-	if(mosq->sock != INVALID_SOCKET &&
+	if(mosq->keepalive && mosq->sock != INVALID_SOCKET &&
 			(now - last_msg_out >= mosq->keepalive || now - last_msg_in >= mosq->keepalive)){
 
 		if(mosq->state == mosq_cs_connected && mosq->ping_t == 0){
@@ -124,9 +123,9 @@ void _mosquitto_check_keepalive(struct mosquitto *mosq)
 				assert(mosq->listener->client_count >= 0);
 			}
 			mosq->listener = NULL;
-#endif
+			_mosquitto_socket_close(db, mosq);
+#else
 			_mosquitto_socket_close(mosq);
-#ifndef WITH_BROKER
 			pthread_mutex_lock(&mosq->state_mutex);
 			if(mosq->state == mosq_cs_disconnecting){
 				rc = MOSQ_ERR_SUCCESS;
@@ -146,55 +145,33 @@ void _mosquitto_check_keepalive(struct mosquitto *mosq)
 	}
 }
 
-/* Convert ////some////over/slashed///topic/etc/etc//
- * into some/over/slashed/topic/etc/etc
- */
-int _mosquitto_fix_sub_topic(char **subtopic)
-{
-	char *fixed = NULL;
-	char *token;
-	char *saveptr = NULL;
-
-	assert(subtopic);
-	assert(*subtopic);
-
-	if(strlen(*subtopic) == 0) return MOSQ_ERR_SUCCESS;
-	/* size of fixed here is +1 for the terminating 0 and +1 for the spurious /
-	 * that gets appended. */
-	fixed = _mosquitto_calloc(strlen(*subtopic)+2, 1);
-	if(!fixed) return MOSQ_ERR_NOMEM;
-
-	if((*subtopic)[0] == '/'){
-		fixed[0] = '/';
-	}
-	token = strtok_r(*subtopic, "/", &saveptr);
-	while(token){
-		strcat(fixed, token);
-		strcat(fixed, "/");
-		token = strtok_r(NULL, "/", &saveptr);
-	}
-
-	fixed[strlen(fixed)-1] = '\0';
-	_mosquitto_free(*subtopic);
-	*subtopic = fixed;
-	return MOSQ_ERR_SUCCESS;
-}
-
 uint16_t _mosquitto_mid_generate(struct mosquitto *mosq)
 {
+	/* FIXME - this would be better with atomic increment, but this is safer
+	 * for now for a bug fix release.
+	 *
+	 * If this is changed to use atomic increment, callers of this function
+	 * will have to be aware that they may receive a 0 result, which may not be
+	 * used as a mid.
+	 */
+	uint16_t mid;
 	assert(mosq);
 
+	pthread_mutex_lock(&mosq->mid_mutex);
 	mosq->last_mid++;
 	if(mosq->last_mid == 0) mosq->last_mid++;
+	mid = mosq->last_mid;
+	pthread_mutex_unlock(&mosq->mid_mutex);
 	
-	return mosq->last_mid;
+	return mid;
 }
 
-/* Search for + or # in a topic. Return MOSQ_ERR_INVAL if found.
+/* Check that a topic used for publishing is valid.
+ * Search for + or # in a topic. Return MOSQ_ERR_INVAL if found.
  * Also returns MOSQ_ERR_INVAL if the topic string is too long.
  * Returns MOSQ_ERR_SUCCESS if everything is fine.
  */
-int _mosquitto_topic_wildcard_len_check(const char *str)
+int mosquitto_pub_topic_check(const char *str)
 {
 	int len = 0;
 	while(str && str[0]){
@@ -209,83 +186,104 @@ int _mosquitto_topic_wildcard_len_check(const char *str)
 	return MOSQ_ERR_SUCCESS;
 }
 
+/* Check that a topic used for subscriptions is valid.
+ * Search for + or # in a topic, check they aren't in invalid positions such as
+ * foo/#/bar, foo/+bar or foo/bar#.
+ * Return MOSQ_ERR_INVAL if invalid position found.
+ * Also returns MOSQ_ERR_INVAL if the topic string is too long.
+ * Returns MOSQ_ERR_SUCCESS if everything is fine.
+ */
+int mosquitto_sub_topic_check(const char *str)
+{
+	char c = '\0';
+	int len = 0;
+	while(str && str[0]){
+		if(str[0] == '+'){
+			if((c != '\0' && c != '/') || (str[1] != '\0' && str[1] != '/')){
+				return MOSQ_ERR_INVAL;
+			}
+		}else if(str[0] == '#'){
+			if((c != '\0' && c != '/')  || str[1] != '\0'){
+				return MOSQ_ERR_INVAL;
+			}
+		}
+		len++;
+		c = str[0];
+		str = &str[1];
+	}
+	if(len > 65535) return MOSQ_ERR_INVAL;
+
+	return MOSQ_ERR_SUCCESS;
+}
+
 /* Does a topic match a subscription? */
 int mosquitto_topic_matches_sub(const char *sub, const char *topic, bool *result)
 {
-	char *local_sub, *local_topic;
 	int slen, tlen;
 	int spos, tpos;
-	int rc;
 	bool multilevel_wildcard = false;
 
 	if(!sub || !topic || !result) return MOSQ_ERR_INVAL;
 
-	local_sub = _mosquitto_strdup(sub);
-	if(!local_sub) return MOSQ_ERR_NOMEM;
-	rc = _mosquitto_fix_sub_topic(&local_sub);
-	if(rc){
-		_mosquitto_free(local_sub);
-		return rc;
-	}
+	slen = strlen(sub);
+	tlen = strlen(topic);
 
-	local_topic = _mosquitto_strdup(topic);
-	if(!local_topic){
-		_mosquitto_free(local_sub);
-		return MOSQ_ERR_NOMEM;
-	}
-	rc = _mosquitto_fix_sub_topic(&local_topic);
-	if(rc){
-		_mosquitto_free(local_sub);
-		_mosquitto_free(local_topic);
-		return rc;
-	}
+	if(slen && tlen){
+		if((sub[0] == '$' && topic[0] != '$')
+				|| (topic[0] == '$' && sub[0] != '$')){
 
-	slen = strlen(local_sub);
-	tlen = strlen(local_topic);
+			*result = false;
+			return MOSQ_ERR_SUCCESS;
+		}
+	}
 
 	spos = 0;
 	tpos = 0;
 
 	while(spos < slen && tpos < tlen){
-		if(local_sub[spos] == local_topic[tpos]){
+		if(sub[spos] == topic[tpos]){
+			if(tpos == tlen-1){
+				/* Check for e.g. foo matching foo/# */
+				if(spos == slen-3 
+						&& sub[spos+1] == '/'
+						&& sub[spos+2] == '#'){
+					*result = true;
+					multilevel_wildcard = true;
+					return MOSQ_ERR_SUCCESS;
+				}
+			}
 			spos++;
 			tpos++;
 			if(spos == slen && tpos == tlen){
 				*result = true;
-				break;
+				return MOSQ_ERR_SUCCESS;
+			}else if(tpos == tlen && spos == slen-1 && sub[spos] == '+'){
+				spos++;
+				*result = true;
+				return MOSQ_ERR_SUCCESS;
 			}
 		}else{
-			if(local_sub[spos] == '+'){
+			if(sub[spos] == '+'){
 				spos++;
-				while(tpos < tlen && local_topic[tpos] != '/'){
+				while(tpos < tlen && topic[tpos] != '/'){
 					tpos++;
 				}
 				if(tpos == tlen && spos == slen){
 					*result = true;
-					break;
+					return MOSQ_ERR_SUCCESS;
 				}
-			}else if(local_sub[spos] == '#'){
+			}else if(sub[spos] == '#'){
 				multilevel_wildcard = true;
 				if(spos+1 != slen){
 					*result = false;
-					break;
+					return MOSQ_ERR_SUCCESS;
 				}else{
 					*result = true;
-					break;
+					return MOSQ_ERR_SUCCESS;
 				}
 			}else{
 				*result = false;
-				break;
-			}
-		}
-		if(tpos == tlen-1){
-			/* Check for e.g. foo matching foo/# */
-			if(spos == slen-3 
-					&& local_sub[spos+1] == '/'
-					&& local_sub[spos+2] == '#'){
-				*result = true;
-				multilevel_wildcard = true;
-				break;
+				return MOSQ_ERR_SUCCESS;
 			}
 		}
 	}
@@ -293,8 +291,6 @@ int mosquitto_topic_matches_sub(const char *sub, const char *topic, bool *result
 		*result = false;
 	}
 
-	_mosquitto_free(local_sub);
-	_mosquitto_free(local_topic);
 	return MOSQ_ERR_SUCCESS;
 }
 
@@ -322,10 +318,10 @@ int _mosquitto_hex2bin(const char *hex, unsigned char *bin, int bin_max_len)
 FILE *_mosquitto_fopen(const char *path, const char *mode)
 {
 #ifdef WIN32
-	char buf[MAX_PATH];
+	char buf[4096];
 	int rc;
-	rc = ExpandEnvironmentStrings(path, buf, MAX_PATH);
-	if(rc == 0 || rc == MAX_PATH){
+	rc = ExpandEnvironmentStrings(path, buf, 4096);
+	if(rc == 0 || rc > 4096){
 		return NULL;
 	}else{
 		return fopen(buf, mode);
