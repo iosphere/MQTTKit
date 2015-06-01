@@ -298,7 +298,13 @@ static bool on_verify_tls(struct mosquitto *mosq, void* obj, void *ctx, int open
     return self;
 }
 
-- (void)setMessageRetry:(NSUInteger)seconds {
+- (void) setMaxInflightMessages:(NSUInteger)maxInflightMessages
+{
+    mosquitto_max_inflight_messages_set(mosq, (unsigned int)maxInflightMessages);
+}
+
+- (void) setMessageRetry: (NSUInteger)seconds
+{
     mosquitto_message_retry_set(mosq, (unsigned int)seconds);
 }
 
